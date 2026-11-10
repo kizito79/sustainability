@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>CITIBIM Infrastructure & Weather Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Interactive map of Nigeria's electricity infrastructure, resources, amenities and real time weather.">
+    <!-- Leaflet & Plugins -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+    <style>
+        :root {
+            --bg: #f7fafc;
+            --panel: #ffffff;
+            --panel-2: #f1f5f9;
+            --group-bg: #f0eeee;
+            --tabs-bg: #e2e8f0;
+            --border: #cbd5e1;
+            --text: #0f172a;
+            --muted: #475569;
+            --accent: #38bdf8;
+            --good: #22c55e;
+            --warn: #f59e0b;
+            --bad: #ef4444;
+            --shadow: 0 10px 25px rgba(2,6,23,.08);
+        }
+        [data-theme="dark"] {
+            --bg: #0b1220;
+            --panel: #0f172a;
+            --panel-2: #1e293b;
+            --group-bg: #111c33;
+            --tabs-bg: #1e293b;
+            --border: #334155;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --accent: #38bdf8;
+            --shadow: 0 10px 30px rgba(0,0,0,.25);
+        }
+        html, body { height: 100%; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Arial, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, sans-serif;
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: 360px 1fr;
+        }
+        #sidebar {
+            background: var(--panel);
+            box-shadow: var(--shadow);
+            height: 100%;
+            overflow-y: auto;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+            min-width: 0;
+        }
+        #sidebar .logo {
+            text-align: center;
+            background: var(--panel);
+            padding: 10px;
+        }
+        #sidebar .logo img { width: 160px; padding-top: 10px; }
+        #sidebar .logo p { font-size: 13px; color: var(--muted); margin: 8px 4px 0; }
+        .tab-header {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            background: var(--tabs-bg);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .tab-header button {
+            flex: 1;
+            padding: 12px;
+            background: none;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 16px;
+            color: var(--text);
+            border-bottom: 2px solid transparent;
+            transition: border 0.2s;
+        }
+        .tab-header button.active {
+            border-bottom: 2px solid var(--accent);
+            background: var(--panel);
+        }
+        .tab-content { display: none; padding: 10px 10px 20px 10px; }
+        .tab-content.active { display: block; }
+        /* Map */
+        #map { height: 100%; width: 100%; z-index: 0; }
+        /* Infrastructure styles */
+        .group { margin-bottom: 10px; }
+        .group-header {
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--panel-2);
+            padding: 15px 12px;
+            font-weight: bold;
+            border-radius: 15px;
+            user-select: none;
+        }
+        .group-content {
+            padding: 14px;
+            display: none;
+            flex-direction: column;
+            background: var(--group-bg);
+            border-radius: 15px;
+            margin-top: 6px;
+        }
+        .group-content.open { display: flex; }
+        .market-label {
+            background: rgba(255, 255, 255, 0.85);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+        }
+        .layer-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin: 6px 0;
+            background: var(--panel);
+            border-radius: 12px;
+            padding: 6px 10px;
+        }
+        .layer-name {
+            flex: 1;
+            text-align: center;
+            font-weight: 500;
+        }
+        .layer-icon {
+            width: 20px;
+            text-align: right;
+        }
+        .toggle {
+            background-color: #ccc;
+            border: none;
+            border-radius: 15px;
+            cursor: pointer;
+            width: 50px;
+            min-width: 50px;
+            height: 25px;
+            position: relative;
+        }
+        .toggle::before {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-color: white;
+            border-radius: 50%;
+            top: 2.5px;
+            left: 3px;
+            transition: transform 0.2s ease;
+        }
+        .toggle.active { background-color: #4CAF50; }
+        .toggle.active::before { transform: translateX(24px); }
+        .toggle.loading { background-color: var(--warn); }
+        .toggle.unavailable { background-color: #94a3b8; cursor: not-allowed; opacity: .5; }
+        .layer-item .status { font-size: 11px; color: var(--muted); display: block; font-weight: normal; }
+        /* Weather styles */
+        .panel { background: var(--panel); border-radius: 16px; padding: 12px; margin-bottom: 10px; border: 1px solid var(--border); }
+        .panel h3 { margin:0 0 8px 0; font-size:14px; color: var(--muted); font-weight:600; }
+        .row { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+        .control { display:flex; flex-direction:column; gap:6px; min-width: 0; }
+        label { font-size:12px; color: var(--muted); }
+        input[type="text"], input[type="search"], select {
+            width:100%;
+            box-sizing: border-box;
+            background: var(--panel-2);
+            border:1px solid var(--border);
+            color: var(--text);
+            padding:10px 12px; border-radius:10px; outline:none;
+        }
+        input[type="range"] { width: 100%; }
+        .btn { cursor:pointer; background: var(--accent); color:white; border:none; border-radius:12px; padding:10px 12px; font-weight:600; }
+        .btn.ghost { background:transparent; color:var(--text); border:1px solid var(--border); text-decoration: none; }
+        .kpis { display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; }
+        .kpi { background: var(--panel-2); border-radius:12px; padding:10px; text-align:center; }
+        .kpi .v { font-size:18px; font-weight:700; }
+        .legend { display:flex; gap:6px; flex-wrap:wrap; }
+        .legend .pill { font-size:12px; padding:4px 8px; border-radius:999px; background: var(--panel-2); border:1px solid var(--border); }
+        .footer { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .muted { color: var(--muted); }
+        /* Custom marker icons */
+        .div-icon { background: none; border: none; }
+        .power-plant-icon { color: #f1290f; font-size: 18px; text-align: center; line-height: 20px; }
+        .electrified-community-icon { color: #2e7d32; font-size: 14px; text-align: center; line-height: 20px; }
+        .coal-mines-icon { color: #472207; font-size: 18px; text-align: center; line-height: 20px; }
+        .school-icon { color: #378f04; font-size: 18px; text-align: center; line-height: 20px; }
+        .population-marker {
+            background: rgba(56, 189, 248, .85);
+            color: #0f172a;
+            border: 2px solid #fff;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: bold;
+            text-align: center;
+            line-height: 28px;
+            height: 28px;
+            min-width: 28px;
+            padding: 0 4px;
+            box-shadow: 0 1px 4px rgba(0,0,0,.3);
+            white-space: nowrap;
+        }
+        .toggle-group {
+            display: flex;
+            gap: 8px;
+            width: 100%;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+        .toggle-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--panel-2);
+            border-radius: 10px;
+            padding: 8px 12px;
+            min-width: 0;
+            font-size: 13px;
+        }
+        .select-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--panel-2);
+            border-radius: 10px;
+            padding: 8px 12px;
+            margin-top: 8px;
+        }
+        .select-control label { margin: 0 4px 0 0; white-space: nowrap; }
+        .select-control select { padding: 6px 8px; font-size: 14px; }
+        .popup-table { border-collapse: collapse; font-size: 12px; }
+        .popup-table th { text-align: left; padding: 2px 8px 2px 0; color: #475569; vertical-align: top; }
+        .popup-table td { padding: 2px 0; word-break: break-word; }
+        .leaflet-popup-content { max-height: 300px; overflow-y: auto; }
+        /* Responsive: stack sidebar above the map on small screens */
+        @media (max-width: 900px) {
+            body { grid-template-columns: 1fr; grid-template-rows: 45vh 1fr; grid-template-rows: 45dvh 1fr; }
+            #sidebar { width: 100%; }
+            #sidebar .logo p { display: none; }
+        }
+    </style>
+</head>
+<body data-theme="light">
+    <div id="sidebar">
+        <div class="logo">
+            <img src="https://citibim.com/wp-content/uploads/2025/05/cropped-Citibim-logo.png" alt="CitiBIM logo">
+            <div><strong>CITIBIM SUSTAINABILITY DASHBOARD</strong></div>
+            <p>This dashboard provides an interactive map of Nigeria's electricity infrastructure, resources, amenities, and real time weather for sustainable development in Nigeria.</p>
+        </div>
+        <div class="tab-header">
+            <button id="infraTabBtn" class="active">Infrastructure</button>
+            <button id="weatherTabBtn">Weather</button>
+        </div>
+        <div id="infraTab" class="tab-content active">
+            <div class="group">
+                <div class="group-header">ON GRID INFRASTRUCTURE <span>+</span></div>
+                <div class="group-content">
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="toggle-transmission" aria-label="Toggle Transmission"></button>
+                        <div class="layer-name">Transmission</div>
+                        <div class="layer-icon"><i class="fas fa-bolt"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="toggle-plants" aria-label="Toggle Power Plants"></button>
+                        <div class="layer-name">Power Plants</div>
+                        <div class="layer-icon"><i class="fas fa-industry"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="gasline" aria-label="Toggle Gas Lines"></button>
+                        <div class="layer-name">Gas Lines</div>
+                        <div class="layer-icon"><i class="fas fa-gas-pump"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="disco-coverage" aria-label="Toggle Disco Coverage"></button>
+                        <div class="layer-name">Disco Coverage</div>
+                        <div class="layer-icon"><i class="fas fa-map"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="electified-community" aria-label="Toggle Electrified community"></button>
+                        <div class="layer-name">Electrified community</div>
+                        <div class="layer-icon"><i class="fas fa-lightbulb"></i></div>
+                    </div>
+                </div>
+            </div>
+            <div class="group">
+                <div class="group-header">OFF GRID INFRASTRUCTURE <span>+</span></div>
+                <div class="group-content">
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="potential_minigrid" aria-label="Toggle Potential Minigrids Communities"></button>
+                        <div class="layer-name">Potential Minigrids Communities</div>
+                        <div class="layer-icon"><i class="fas fa-bolt"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="potential_shs" aria-label="Toggle Potential SHS Communities"></button>
+                        <div class="layer-name">Potential SHS Communities</div>
+                        <div class="layer-icon"><i class="fas fa-solar-panel"></i></div>
+                    </div>
+                </div>
+            </div>
+            <div class="group">
+                <div class="group-header">COMMUNITY DETAILS <span>+</span></div>
+                <div class="group-content">
+                    <label for="populationRange">Minimum population</label>
+                    <input type="range" id="populationRange" min="0" max="1000000" step="2000" value="0">
+                    <span id="populationValue">Move the slider to show communities</span>
+                    <span id="populationTotal">Visible Locations: 0</span>
+                </div>
+            </div>
+            <div class="group">
+                <div class="group-header">RESOURCES <span>+</span></div>
+                <div class="group-content">
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="mines" aria-label="Toggle Mines"></button>
+                        <div class="layer-name">Mines</div>
+                        <div class="layer-icon"><i class="fas fa-gem"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="coal_mine" aria-label="Toggle Coal Mine"></button>
+                        <div class="layer-name">Coal Mine</div>
+                        <div class="layer-icon"><i class="fas fa-cubes"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="solar" aria-label="Toggle Solar Radiance"></button>
+                        <div class="layer-name">Solar Radiance</div>
+                        <div class="layer-icon"><i class="fas fa-sun"></i></div>
+                    </div>
+                </div>
+            </div>
+            <div class="group">
+                <div class="group-header">MARKETS <span>+</span></div>
+                <div class="group-content">
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="wuse-market" aria-label="Toggle Wuse Market"></button>
+                        <div class="layer-name">Wuse Market, Abuja</div>
+                        <div class="layer-icon"><i class="fas fa-shop"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="lagos-island-market" aria-label="Toggle Lagos Island Market"></button>
+                        <div class="layer-name">Lagos Island Market</div>
+                        <div class="layer-icon"><i class="fas fa-shop"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="agbani-market" aria-label="Toggle Agbani Market"></button>
+                        <div class="layer-name">Agbani Market, Ibadan</div>
+                        <div class="layer-icon"><i class="fas fa-shop"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="sabo-market" aria-label="Toggle Sabon Gari Market"></button>
+                        <div class="layer-name">Sabon Gari market, Kano</div>
+                        <div class="layer-icon"><i class="fas fa-shop"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="rumu-okoro-market" aria-label="Toggle Rumu Okoro Market"></button>
+                        <div class="layer-name">Rumu Okoro Market, Rivers State</div>
+                        <div class="layer-icon"><i class="fas fa-shop"></i></div>
+                    </div>
+                </div>
+            </div>
+            <div class="group">
+                <div class="group-header">AMENITIES <span>+</span></div>
+                <div class="group-content">
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="schools" aria-label="Toggle Schools"></button>
+                        <div class="layer-name">Schools</div>
+                        <div class="layer-icon"><i class="fas fa-school"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="waterpoints" aria-label="Toggle Water Points"></button>
+                        <div class="layer-name">Water Points</div>
+                        <div class="layer-icon"><i class="fas fa-water"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="air_ports" aria-label="Toggle Air Ports"></button>
+                        <div class="layer-name">Air Ports</div>
+                        <div class="layer-icon"><i class="fas fa-plane"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="sea_ports" aria-label="Toggle Sea Ports"></button>
+                        <div class="layer-name">Sea Ports</div>
+                        <div class="layer-icon"><i class="fas fa-anchor"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="health_care" aria-label="Toggle Health Care"></button>
+                        <div class="layer-name">Health Care</div>
+                        <div class="layer-icon"><i class="fas fa-hospital"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="financial_services" aria-label="Toggle Financial Services"></button>
+                        <div class="layer-name">Financial Services</div>
+                        <div class="layer-icon"><i class="fas fa-building-columns"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="roads" aria-label="Toggle Road Network"></button>
+                        <div class="layer-name">Road Network</div>
+                        <div class="layer-icon"><i class="fas fa-road"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="railways" aria-label="Toggle Rail Ways"></button>
+                        <div class="layer-name">Rail Ways</div>
+                        <div class="layer-icon"><i class="fas fa-train"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="river" aria-label="Toggle River Points"></button>
+                        <div class="layer-name">River Points</div>
+                        <div class="layer-icon"><i class="fas fa-droplet"></i></div>
+                    </div>
+                </div>
+            </div>
+            <div class="group">
+                <div class="group-header">TCN INFRASTRUCTURE <span>+</span></div>
+                <div class="group-content">
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="trans_330_132" aria-label="Toggle 330/132kV Transmission"></button>
+                        <div class="layer-name">330/132kV Transmission</div>
+                        <div class="layer-icon"><i class="fas fa-bolt"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="substation" aria-label="Toggle Substations"></button>
+                        <div class="layer-name">Substations</div>
+                        <div class="layer-icon"><i class="fas fa-charging-station"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="hydro" aria-label="Toggle Hydro Substation"></button>
+                        <div class="layer-name">Hydro Substation</div>
+                        <div class="layer-icon"><i class="fas fa-water"></i></div>
+                    </div>
+                    <div class="layer-item">
+                        <button class="toggle" data-layer="toggle_thermal" aria-label="Toggle Thermal Energy"></button>
+                        <div class="layer-name">Thermal Energy</div>
+                        <div class="layer-icon"><i class="fas fa-fire"></i></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="weatherTab" class="tab-content">
+            <div class="panel" id="controls">
+                <h3>Weather Controls</h3>
+                <div class="row" style="margin-top:8px;">
+                    <div class="control">
+                        <label for="citySearch">City search</label>
+                        <div style="display:flex; gap:6px;">
+                            <input id="citySearch" type="search" placeholder="e.g. Lagos, Abuja" />
+                            <button class="btn" id="searchBtn" title="Search"><i class="ri-search-2-line"></i></button>
+                        </div>
+                    </div>
+                    <div class="control">
+                        <label for="quickCity">Quick cities</label>
+                        <select id="quickCity">
+                            <option value="">Select</option>
+                            <option value="Lagos, NG|6.5244|3.3792">Lagos</option>
+                            <option value="Abuja, NG|9.0765|7.3986">Abuja</option>
+                            <option value="Port Harcourt, NG|4.8156|7.0498">Port Harcourt</option>
+                            <option value="Kano, NG|12.0000|8.5167">Kano</option>
+                            <option value="Ibadan, NG|7.3775|3.9470">Ibadan</option>
+                            <option value="Enugu, NG|6.4490|7.4940">Enugu</option>
+                            <option value="Kaduna, NG|10.5236|7.4386">Kaduna</option>
+                            <option value="Benin City, NG|6.3350|5.6037">Benin City</option>
+                            <option value="Maiduguri, NG|11.8333|13.1500">Maiduguri</option>
+                            <option value="Calabar, NG|4.9517|8.3220">Calabar</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="margin-top:8px;">
+                    <div class="toggle-group">
+                        <div class="toggle-control">
+                            <span>Units: <strong id="unitsLabel">Metric (°C)</strong></span>
+                            <button class="btn ghost" id="unitsToggle"><i class="ri-exchange-line"></i> Toggle</button>
+                        </div>
+                        <div class="toggle-control">
+                            <span>Theme</span>
+                            <button class="btn ghost" id="themeToggle"><i class="ri-sun-line"></i> / <i class="ri-moon-line"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="select-control">
+                    <label for="basemapSelect">Basemap</label>
+                    <select id="basemapSelect">
+                        <option value="osm" selected>OpenStreetMap</option>
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                    </select>
+                </div>
+                <div class="select-control">
+                    <label for="overlaySelect">Weather Overlay</label>
+                    <select id="overlaySelect">
+                        <option value="" selected>None</option>
+                        <option value="precipitation_new">🌧 Precipitation</option>
+                        <option value="clouds_new">☁ Clouds</option>
+                        <option value="wind_new">💨 Wind</option>
+                        <option value="temp_new">🌡 Temperature</option>
+                        <option value="pressure_new">⚡ Pressure</option>
+                    </select>
+                </div>
+                <div class="control" style="margin-top:16px;">
+                    <label for="hourSlider">Forecast hour</label>
+                    <input id="hourSlider" type="range" min="0" max="47" value="0" />
+                    <small class="muted">Selected hour: <span id="hourLabel">Now</span></small>
+                </div>
+                <div class="row" style="margin-top:8px;">
+                    <button class="btn" id="locate"><i class="ri-crosshair-2-line"></i> My location</button>
+                    <button class="btn ghost" id="resetBtn"><i class="ri-refresh-line"></i> Reset</button>
+                </div>
+            </div>
+            <div class="panel">
+                <h3>Current Conditions</h3>
+                <div class="kpis">
+                    <div class="kpi"><div class="v" id="kpiTemp">…</div><div>Temp</div></div>
+                    <div class="kpi"><div class="v" id="kpiWind">…</div><div>Wind</div></div>
+                    <div class="kpi"><div class="v" id="kpiHum">…</div><div>Humidity</div></div>
+                </div>
+                <div class="legend" style="margin-top:8px;">
+                    <div class="pill" id="kpiCity">Select a city</div>
+                    <div class="pill" id="kpiDesc">…</div>
+                </div>
+            </div>
+            <div class="panel">
+                <h3>Forecast</h3>
+                <div class="card"><canvas id="forecastChart" height="160"></canvas></div>
+            </div>
+            <div class="footer">
+                <span class="muted" style="font-size:12px;">Data © OpenWeather • Map © OpenStreetMap contributors</span>
+                <a class="btn ghost" href="https://citibim.com" target="_blank" rel="noreferrer">CitiBIM</a>
+            </div>
+        </div>
+    </div>
+    <div id="map"></div>
+    <script>
+    (function () {
+        'use strict';
+
+        // ========== CONFIG ==========
+        // Data files are served straight from GitHub (raw.githubusercontent.com sends
+        // Access-Control-Allow-Origin: *), so no CORS proxy is needed.
+        const DATA_BASE = 'https://raw.githubusercontent.com/kizito79/REA_Dashbord/main/';
+        const OWM_KEY = 'e916bf351ebe85669f0cfc9557a462e1';
+
+        const storage = {
+            get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } },
+            set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } }
+        };
+        const store = {
+            get theme() { return storage.get('theme', 'light'); },
+            set theme(v) { storage.set('theme', v); },
+            get units() { return storage.get('units', 'metric'); },
+            set units(v) { storage.set('units', v); }
+        };
+
+        const $ = (id) => document.getElementById(id);
+        const escapeHtml = (v) => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        // ========== TABS ==========
+        function showTab(which) {
+            const infra = which === 'infra';
+            $('infraTabBtn').classList.toggle('active', infra);
+            $('weatherTabBtn').classList.toggle('active', !infra);
+            $('infraTab').classList.toggle('active', infra);
+            $('weatherTab').classList.toggle('active', !infra);
+            if (!infra && chart) chart.resize();
+        }
+        $('infraTabBtn').addEventListener('click', () => showTab('infra'));
+        $('weatherTabBtn').addEventListener('click', () => showTab('weather'));
+
+        // ========== MAP INIT ==========
+        const nigeriaBounds = L.latLngBounds([[4.27, 2.69], [13.89, 14.68]]);
+        const map = L.map('map', {
+            center: [9.0820, 8.6753],
+            zoom: 6,
+            minZoom: 5,
+            maxZoom: 19,
+            maxBounds: nigeriaBounds.pad(0.3),
+            maxBoundsViscosity: 1.0,
+            preferCanvas: true
+        });
+        map.fitBounds(nigeriaBounds);
+
+        // Basemaps (OpenStreetMap is the default)
+        const basemaps = {
+            osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }),
+            light: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19, subdomains: 'abcd',
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            }),
+            dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19, subdomains: 'abcd',
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            })
+        };
+        let currentBasemap = basemaps.osm.addTo(map);
+        function setBasemap(key) {
+            const next = basemaps[key] || basemaps.osm;
+            if (next === currentBasemap) return;
+            map.removeLayer(currentBasemap);
+            currentBasemap = next.addTo(map);
+            currentBasemap.bringToBack();
+        }
+
+        // ========== POPUPS ==========
+        function propsPopup(props, title) {
+            const rows = Object.entries(props || {})
+                .filter(([, v]) => v !== null && v !== undefined && v !== '')
+                .map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : v)}</td></tr>`)
+                .join('');
+            const head = title ? `<strong>${escapeHtml(title)}</strong><br>` : '';
+            return head + (rows ? `<table class="popup-table">${rows}</table>` : '<em>No attributes</em>');
+        }
+
+        // ========== LAYER DEFINITIONS ==========
+        // Each layer is loaded lazily the first time it is switched on, so the
+        // page does not download tens of MB of data on startup.
+        const iconMarker = (cls, fa) => (feature, latlng) => L.marker(latlng, {
+            icon: L.divIcon({ className: `div-icon ${cls}`, html: `<i class="fas ${fa}"></i>`, iconSize: [20, 20], iconAnchor: [10, 10] })
+        });
+        const dot = (color, radius = 5) => (feature, latlng) => L.circleMarker(latlng, {
+            radius, color: '#fff', weight: 1, fillColor: color, fillOpacity: 0.9
+        });
+        const discoPalette = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#008080', '#9a6324', '#800000'];
+
+        const LAYERS = {
+            'toggle-transmission': { file: 'transmission_lines.geojson', style: { color: '#e74c3c', weight: 2, dashArray: '5, 5' } },
+            'toggle-plants':       { file: 'power_plants.json', pointToLayer: iconMarker('power-plant-icon', 'fa-bolt'), title: p => p.name || 'Power Plant' },
+            'gasline':             { file: 'Gas%20pipelines.json', style: { color: '#ca8a04', weight: 2, dashArray: '5, 5' } },
+            'disco-coverage':      { file: 'disco%20coverage%20main.json', style: f => {
+                                        const id = parseInt(f.properties && f.properties.disco_id, 10) || 0;
+                                        return { color: discoPalette[id % discoPalette.length], weight: 1, fillOpacity: 0.2 };
+                                    }, title: p => p.disco_full || p.disco_name },
+            'electified-community':{ file: 'minigrids.geojson', pointToLayer: iconMarker('electrified-community-icon', 'fa-circle'), title: p => p.community || p.name || 'Electrified Community' },
+            'mines':               { file: 'mines.geojson', pointToLayer: dot('#7c3aed') },
+            'coal_mine':           { file: 'Coal%20Deposit.json', pointToLayer: iconMarker('coal-mines-icon', 'fa-gem'), title: p => p.name || 'Coal Mine' },
+            'solar':               { file: 'solar_radiance.geojson', style: { color: '#f59e0b', weight: 1, fillOpacity: 0.3 } },
+            'wuse-market':         { file: 'Wuse_Market.json', label: 'Wuse market, Abuja' },
+            'lagos-island-market': { file: 'Lagos__island_Market.json', label: 'Lagos Island market, Lagos State' },
+            'agbani-market':       { file: 'Agbani_market_new.json', label: 'Agbani market, Ibadan' },
+            'sabo-market':         { file: 'Sabon_Gari_Market_Kano.json', label: 'Sabon Gari Market, Kano State' },
+            'rumu-okoro-market':   { file: 'Rumuokoro_Market_Rivers.json', label: 'Rumu Okoro market, Rivers State' },
+            'schools':             { file: 'schools.geojson', cluster: true, pointToLayer: iconMarker('school-icon', 'fa-school'), title: p => p.name || 'School' },
+            'waterpoints':         { csv: 'wpdx_enhanced.csv' },
+            'air_ports':           { file: 'airports.geojson', pointToLayer: dot('#2563eb', 7), style: { color: '#2563eb', weight: 1, fillOpacity: 0.3 }, title: p => p.name || 'Airport' },
+            'sea_ports':           { file: 'sea_ports.geojson', pointToLayer: dot('#0891b2', 7), style: { color: '#0891b2', weight: 1, fillOpacity: 0.3 }, title: p => p.name || 'Sea Port' },
+            'health_care':         { file: 'health_facilities.geojson', cluster: true, pointToLayer: dot('#dc2626'), style: { color: '#dc2626', weight: 1 }, title: p => p.name || 'Health Facility' },
+            'financial_services':  { file: 'financial_services.geojson', cluster: true, pointToLayer: dot('#16a34a'), style: { color: '#16a34a', weight: 1 }, title: p => p.name || 'Financial Service' },
+            'roads':               { file: 'roads.geojson', style: { color: '#6b7280', weight: 2, fillOpacity: 0.2 }, title: p => p.name },
+            'railways':            { file: 'railways.geojson', style: { color: '#111827', weight: 2, dashArray: '8, 4' }, title: p => p.name },
+            'trans_330_132':       { file: 'High%20voltage%20line.json', style: { color: '#b91c1c', weight: 2 } },
+            'substation':          { file: 'substation%20installed.json', pointToLayer: dot('#ea580c', 6) },
+            'hydro':               { file: 'Hydro%20Generation%20Stations.json', pointToLayer: dot('#0284c7', 7) },
+            'toggle_thermal':      { file: 'thermal%20genration.json', pointToLayer: dot('#b45309', 7) }
+            // 'potential_minigrid', 'potential_shs' and 'river' have no dataset yet.
+        };
+
+        const layerState = {}; // key -> { layer, promise }
+
+        function buildGeoJsonLayer(def, data) {
+            const geo = L.geoJSON(data, {
+                style: def.style,
+                pointToLayer: def.pointToLayer || dot('#0ea5e9'),
+                onEachFeature: (feature, lyr) => {
+                    const props = feature.properties || {};
+                    const title = def.title ? def.title(props) : null;
+                    lyr.bindPopup(() => propsPopup(props, title), { maxWidth: 420 });
+                    if (def.label) {
+                        lyr.bindTooltip(escapeHtml(props.name || def.label), { permanent: true, direction: 'top', className: 'market-label' });
+                    }
+                }
+            });
+            if (!def.cluster) return geo;
+            const cluster = L.markerClusterGroup({ chunkedLoading: true });
+            cluster.addLayer(geo);
+            return cluster;
+        }
+
+        function loadCsvPoints(def) {
+            return new Promise((resolve, reject) => {
+                const cluster = L.markerClusterGroup({ chunkedLoading: true });
+                const markers = [];
+                Papa.parse(DATA_BASE + def.csv, {
+                    download: true,
+                    header: true,
+                    skipEmptyLines: true,
+                    worker: false,
+                    step: (row) => {
+                        const r = row.data;
+                        const lat = parseFloat(r.lat_deg);
+                        const lng = parseFloat(r.lon_deg);
+                        if (isNaN(lat) || isNaN(lng)) return;
+                        const m = L.circleMarker([lat, lng], { radius: 4, color: '#fff', weight: 1, fillColor: '#0ea5e9', fillOpacity: 0.9 });
+                        m.bindPopup(() => propsPopup({
+                            'Water source': r.water_source_clean,
+                            'Technology': r.water_tech_clean,
+                            'Status': r.status_clean,
+                            'LGA': r.clean_adm2,
+                            'Install year': r.install_year,
+                            'Local population': r.local_population,
+                            'Report date': r.report_date,
+                            'Lat, Lng': `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+                        }, 'Water Point'));
+                        markers.push(m);
+                    },
+                    complete: () => { cluster.addLayers(markers); resolve(cluster); },
+                    error: reject
+                });
+            });
+        }
+
+        function ensureLayer(key) {
+            const def = LAYERS[key];
+            if (!def) return Promise.reject(new Error('No data available for this layer yet'));
+            if (!layerState[key]) {
+                const promise = def.csv
+                    ? loadCsvPoints(def)
+                    : fetch(DATA_BASE + def.file)
+                        .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+                        .then(data => buildGeoJsonLayer(def, data));
+                layerState[key] = { promise };
+                promise.then(layer => { layerState[key].layer = layer; })
+                       .catch(() => { delete layerState[key]; });
+            }
+            return layerState[key].promise;
+        }
+
+        function markUnavailable(btn, msg) {
+            btn.classList.remove('active', 'loading');
+            btn.classList.add('unavailable');
+            btn.title = msg;
+            const name = btn.parentElement.querySelector('.layer-name');
+            if (name && !name.querySelector('.status')) {
+                const s = document.createElement('span');
+                s.className = 'status';
+                s.textContent = msg;
+                name.appendChild(s);
+            }
+        }
+
+        // Layer toggles
+        document.querySelectorAll('.toggle[data-layer]').forEach(btn => {
+            const key = btn.dataset.layer;
+            if (!LAYERS[key]) markUnavailable(btn, 'No data yet');
+            btn.addEventListener('click', (evt) => {
+                evt.preventDefault();
+                if (btn.classList.contains('unavailable') || btn.classList.contains('loading')) return;
+                const turnOn = !btn.classList.contains('active');
+                if (!turnOn) {
+                    btn.classList.remove('active');
+                    const st = layerState[key];
+                    if (st && st.layer && map.hasLayer(st.layer)) map.removeLayer(st.layer);
+                    return;
+                }
+                btn.classList.add('loading');
+                ensureLayer(key)
+                    .then(layer => {
+                        btn.classList.remove('loading');
+                        btn.classList.add('active');
+                        if (!map.hasLayer(layer)) map.addLayer(layer);
+                    })
+                    .catch(err => {
+                        console.error(`Layer "${key}" failed to load:`, err);
+                        btn.classList.remove('loading');
+                        if (/404/.test(err.message) || !LAYERS[key]) markUnavailable(btn, 'Data not found');
+                        else alert(`Could not load this layer (${err.message}). Please try again.`);
+                    });
+            });
+        });
+
+        // Group expand/collapse
+        document.querySelectorAll('.group-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const content = header.nextElementSibling;
+                const open = content.classList.toggle('open');
+                header.querySelector('span').textContent = open ? '−' : '+';
+            });
+        });
+
+        // ========== POPULATION FILTER ==========
+        const populationCluster = L.markerClusterGroup({ chunkedLoading: true });
+        let populationData = null;
+        let populationTimer = null;
+        function loadPopulation() {
+            if (!populationData) {
+                populationData = fetch(DATA_BASE + 'populated_places.geojson')
+                    .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+                    .catch(err => { populationData = null; throw err; });
+            }
+            return populationData;
+        }
+        function renderPopulation(minPop) {
+            $('populationTotal').innerText = 'Loading communities…';
+            loadPopulation().then(data => {
+                populationCluster.clearLayers();
+                const seen = new Set();
+                const markers = [];
+                data.features.forEach(f => {
+                    const pop = parseInt(f.properties && f.properties.population, 10);
+                    if (!pop || pop < minPop || !f.geometry || f.geometry.type !== 'Point') return;
+                    const c = f.geometry.coordinates;
+                    const key = `${c[0].toFixed(4)},${c[1].toFixed(4)}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    const m = L.marker([c[1], c[0]], {
+                        icon: L.divIcon({
+                            className: 'div-icon',
+                            html: `<div class="population-marker">${pop.toLocaleString()}</div>`,
+                            iconSize: null
+                        })
+                    });
+                    m.bindPopup(() => propsPopup(f.properties, f.properties.name));
+                    markers.push(m);
+                });
+                populationCluster.addLayers(markers);
+                $('populationTotal').innerText = `Visible Locations: ${markers.length.toLocaleString()}`;
+                if (!map.hasLayer(populationCluster)) map.addLayer(populationCluster);
+            }).catch(err => {
+                console.error(err);
+                $('populationTotal').innerText = 'Could not load population data.';
+            });
+        }
+        $('populationRange').addEventListener('input', (e) => {
+            const val = parseInt(e.target.value, 10) || 0;
+            $('populationValue').innerText = `Population ≥ ${val.toLocaleString()}`;
+            clearTimeout(populationTimer);
+            populationTimer = setTimeout(() => renderPopulation(val), 300);
+        });
+
+        // ========== WEATHER DASHBOARD ==========
+        let weatherOverlay = null;
+        function setOverlay(type) {
+            if (weatherOverlay) { map.removeLayer(weatherOverlay); weatherOverlay = null; }
+            if (!type) return;
+            weatherOverlay = L.tileLayer(`https://tile.openweathermap.org/map/${type}/{z}/{x}/{y}.png?appid=${OWM_KEY}`, {
+                opacity: 0.7, maxZoom: 19, attribution: '&copy; OpenWeather'
+            }).addTo(map);
+        }
+        function iconFor(weatherId) {
+            if (weatherId >= 200 && weatherId < 300) return '⛈️';
+            if (weatherId >= 300 && weatherId < 600) return '🌧️';
+            if (weatherId >= 600 && weatherId < 700) return '❄️';
+            if (weatherId >= 700 && weatherId < 800) return '🌫️';
+            if (weatherId === 800) return '☀️';
+            if (weatherId > 800) return '⛅';
+            return '🌡️';
+        }
+        function fmtTemp(t) { return store.units === 'metric' ? `${Math.round(t)}°C` : `${Math.round(t)}°F`; }
+        function fmtWind(w) { return store.units === 'metric' ? `${Math.round(w)} m/s` : `${Math.round(w)} mph`; }
+
+        async function getJson(url) {
+            const r = await fetch(url);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        }
+        async function fetchWeather(lat, lon) {
+            const q = `lat=${lat}&lon=${lon}&units=${store.units}&appid=${OWM_KEY}`;
+            // One Call 3.0 needs a separate subscription; fall back to the free endpoints.
+            try {
+                const data = await getJson(`https://api.openweathermap.org/data/3.0/onecall?${q}`);
+                return data;
+            } catch (e) { /* fall through */ }
+            const [cur, fc] = await Promise.all([
+                getJson(`https://api.openweathermap.org/data/2.5/weather?${q}`),
+                getJson(`https://api.openweathermap.org/data/2.5/forecast?${q}`)
+            ]);
+            const hourly = (fc.list || []).map(x => ({
+                dt: x.dt, temp: x.main.temp, wind_speed: x.wind.speed, humidity: x.main.humidity, pop: x.pop || 0,
+                weather: [{ id: x.weather?.[0]?.id || 800, description: x.weather?.[0]?.description || '' }]
+            }));
+            const current = {
+                dt: cur.dt, temp: cur.main.temp, wind_speed: cur.wind.speed, humidity: cur.main.humidity,
+                weather: [{ id: cur.weather?.[0]?.id || 800, description: cur.weather?.[0]?.description || '' }]
+            };
+            return { lat, lon, current, hourly };
+        }
+
+        let chart = null;
+        let lastHourly = null;
+        function cssVar(name) { return getComputedStyle(document.body).getPropertyValue(name).trim(); }
+        function renderChart(hourly) {
+            lastHourly = hourly;
+            const rows = hourly.slice(0, 48);
+            const labels = rows.map(h => new Date(h.dt * 1000).toLocaleString([], { hour: '2-digit', day: '2-digit', month: 'short' }));
+            const text = cssVar('--text');
+            const muted = cssVar('--muted');
+            if (chart) chart.destroy();
+            chart = new Chart($('forecastChart'), {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        { label: store.units === 'metric' ? 'Temp °C' : 'Temp °F', data: rows.map(h => h.temp), yAxisID: 'y1', borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,.2)', tension: .35, fill: true },
+                        { label: 'Precip %', data: rows.map(h => Math.round((h.pop || 0) * 100)), yAxisID: 'y2', borderColor: '#94a3b8', backgroundColor: 'rgba(148,163,184,.2)', tension: .35 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        y1: { type: 'linear', position: 'left', ticks: { color: text }, grid: { color: 'rgba(148,163,184,.15)' } },
+                        y2: { type: 'linear', position: 'right', min: 0, max: 100, ticks: { color: text }, grid: { drawOnChartArea: false } },
+                        x: { ticks: { color: muted, maxRotation: 0, autoSkip: true, maxTicksLimit: 6 } }
+                    },
+                    plugins: { legend: { labels: { color: muted } } }
+                }
+            });
+        }
+        function setKpis(city, h) {
+            if (city != null) $('kpiCity').textContent = city;
+            $('kpiTemp').textContent = h.temp != null ? fmtTemp(h.temp) : '…';
+            $('kpiWind').textContent = h.wind_speed != null ? fmtWind(h.wind_speed) : '…';
+            $('kpiHum').textContent = h.humidity != null ? `${h.humidity}%` : '…';
+            const w = h.weather && h.weather[0];
+            $('kpiDesc').textContent = w && w.description ? `${iconFor(w.id)} ${w.description}` : '…';
+        }
+
+        let activeMarker = null;
+        let activeName = null;
+        let current = null;
+        const hourSlider = $('hourSlider');
+        hourSlider.addEventListener('input', () => {
+            if (!current) return;
+            const idx = parseInt(hourSlider.value, 10);
+            const h = current.hourly[idx];
+            if (!h) return;
+            $('hourLabel').textContent = idx === 0 ? 'Now' : new Date(h.dt * 1000).toLocaleString();
+            setKpis(null, idx === 0 ? current.current : h);
+        });
+
+        async function loadCity(name, lat, lon, { silent = false } = {}) {
+            $('kpiCity').textContent = `Loading ${name}…`;
+            try {
+                const data = await fetchWeather(lat, lon);
+                current = data;
+                activeName = name;
+                if (activeMarker) map.removeLayer(activeMarker);
+                activeMarker = L.marker([lat, lon]).addTo(map)
+                    .bindPopup(`<strong>${escapeHtml(name)}</strong><br/>${fmtTemp(data.current.temp)} • ${escapeHtml(data.current.weather?.[0]?.description || '')}`);
+                if (!silent) { activeMarker.openPopup(); map.setView([lat, lon], Math.max(map.getZoom(), 8)); }
+                setKpis(name, data.current);
+                renderChart(data.hourly);
+                hourSlider.max = Math.max(0, Math.min(47, data.hourly.length - 1));
+                hourSlider.value = 0;
+                $('hourLabel').textContent = 'Now';
+            } catch (e) {
+                console.error('Weather load failed:', e);
+                $('kpiCity').textContent = name;
+                $('kpiDesc').textContent = 'Weather data unavailable';
+                if (!silent) alert('Failed to load weather data.');
+            }
+        }
+
+        // Weather controls
+        $('overlaySelect').addEventListener('change', (e) => setOverlay(e.target.value));
+        $('basemapSelect').addEventListener('change', (e) => setBasemap(e.target.value));
+        $('unitsToggle').addEventListener('click', () => {
+            store.units = store.units === 'metric' ? 'imperial' : 'metric';
+            $('unitsLabel').textContent = store.units === 'metric' ? 'Metric (°C)' : 'Imperial (°F)';
+            if (activeMarker) {
+                const { lat, lng } = activeMarker.getLatLng();
+                loadCity(activeName || 'Selected location', lat, lng, { silent: true });
+            }
+        });
+        function applyTheme(t) {
+            document.body.setAttribute('data-theme', t);
+            store.theme = t;
+            if (lastHourly) renderChart(lastHourly);
+        }
+        $('themeToggle').addEventListener('click', () => {
+            const next = document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+            applyTheme(next);
+            // Match the basemap to the theme unless the user picked OSM explicitly.
+            const sel = $('basemapSelect');
+            if (sel.value !== 'osm') { sel.value = next; setBasemap(next); }
+        });
+        $('searchBtn').addEventListener('click', async () => {
+            const q = $('citySearch').value.trim();
+            if (!q) return;
+            try {
+                const arr = await getJson(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=ng&limit=1`);
+                if (!arr.length) return alert('No results found in Nigeria.');
+                const { display_name, lat, lon } = arr[0];
+                loadCity(display_name, parseFloat(lat), parseFloat(lon));
+            } catch (e) { alert('Search failed.'); }
+        });
+        $('citySearch').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('searchBtn').click(); });
+        $('quickCity').addEventListener('change', (e) => {
+            if (!e.target.value) return;
+            const [name, lat, lon] = e.target.value.split('|');
+            loadCity(name, parseFloat(lat), parseFloat(lon));
+        });
+        $('locate').addEventListener('click', () => {
+            if (!navigator.geolocation) return alert('Geolocation not supported');
+            navigator.geolocation.getCurrentPosition((pos) => {
+                const { latitude, longitude } = pos.coords;
+                loadCity('My Location', latitude, longitude);
+            }, () => alert('Unable to get your location'));
+        });
+        $('resetBtn').addEventListener('click', () => {
+            map.fitBounds(nigeriaBounds);
+            if (activeMarker) { map.removeLayer(activeMarker); activeMarker = null; }
+            current = null; activeName = null; lastHourly = null;
+            $('quickCity').value = '';
+            $('kpiCity').textContent = 'Select a city';
+            $('kpiTemp').textContent = $('kpiWind').textContent = $('kpiHum').textContent = '…';
+            $('kpiDesc').textContent = '…';
+            $('hourLabel').textContent = 'Now';
+            hourSlider.value = 0;
+            if (chart) { chart.destroy(); chart = null; }
+        });
+
+        // Startup
+        document.body.setAttribute('data-theme', store.theme);
+        $('unitsLabel').textContent = store.units === 'metric' ? 'Metric (°C)' : 'Imperial (°F)';
+        window.addEventListener('resize', () => map.invalidateSize());
+        loadCity('Abuja, NG', 9.0765, 7.3986, { silent: true });
+    })();
+    </script>
+</body>
+</html>
